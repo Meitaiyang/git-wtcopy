@@ -1,0 +1,11 @@
+/git-wtcopy
+/dist/
+*.test
+*.out
+
+# Vibe Coding file
+.claude/
+.agents/
+CLAUDE.md
+AGENTS.md
+skills-lock.json
