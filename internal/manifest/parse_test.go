@@ -63,3 +63,53 @@ func TestParse_RejectsPathTraversal(t *testing.T) {
 		}
 	}
 }
+
+func TestParse_RejectsDoubleStar(t *testing.T) {
+	// Arrange: a manifest containing the reserved recursive-glob syntax.
+	input := "packages/**/.env\n"
+
+	// Act: parse the manifest.
+	_, err := Parse(strings.NewReader(input))
+
+	// Assert: recursive globbing is rejected with line and pattern context.
+	if err == nil {
+		t.Fatal("expected error for double-star pattern")
+	}
+	want := `line 1: "**" is not supported yet: "packages/**/.env"`
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %q, want it to contain %q", err, want)
+	}
+}
+
+func TestParse_RejectsInvalidGlobPattern(t *testing.T) {
+	// Arrange: a manifest containing an unterminated character class.
+	input := "packages/[abc/.env\n"
+
+	// Act: parse the manifest.
+	_, err := Parse(strings.NewReader(input))
+
+	// Assert: malformed syntax is rejected during parsing with line context.
+	if err == nil {
+		t.Fatal("expected error for invalid glob pattern")
+	}
+	want := `line 1: invalid glob pattern "packages/[abc/.env"`
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %q, want it to contain %q", err, want)
+	}
+}
+
+func TestParse_AcceptsGlobPattern(t *testing.T) {
+	// Arrange: a manifest containing a supported glob pattern.
+	input := ".env*\n"
+
+	// Act: parse the manifest.
+	entries, err := Parse(strings.NewReader(input))
+
+	// Assert: the pattern is retained for Expand to resolve later.
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Path != ".env*" {
+		t.Fatalf("entries = %+v, want one .env* pattern", entries)
+	}
+}

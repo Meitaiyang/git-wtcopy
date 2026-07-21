@@ -26,8 +26,8 @@ func Load(filePath string) ([]Entry, error) {
 
 // Parse reads manifest entries from r. Blank lines and lines starting with
 // "#" are ignored. Every other line is a single repository-root-relative
-// path; absolute paths and paths containing ".." segments are rejected
-// since they could escape the worktree they're being copied into.
+// path or glob pattern; absolute paths and paths containing ".." segments
+// are rejected since they could escape the worktree they're being copied into.
 func Parse(r io.Reader) ([]Entry, error) {
 	var entries []Entry
 
@@ -60,6 +60,14 @@ func validatePath(p string) error {
 	for _, segment := range strings.Split(p, "/") {
 		if segment == ".." {
 			return fmt.Errorf("path traversal (\"..\") is not allowed: %q", p)
+		}
+	}
+	if strings.Contains(p, "**") {
+		return fmt.Errorf("\"**\" is not supported yet: %q", p)
+	}
+	if isPattern(p) {
+		if _, err := path.Match(p, ""); err != nil {
+			return fmt.Errorf("invalid glob pattern %q: %w", p, err)
 		}
 	}
 	return nil

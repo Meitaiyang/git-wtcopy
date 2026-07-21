@@ -2,7 +2,6 @@ package cli
 
 import (
 	"flag"
-	"fmt"
 	"io"
 
 	"github.com/meitaiyang/git-wtcopy/internal/copier"
@@ -20,10 +19,6 @@ func runCopy(args []string, stdout, stderr io.Writer) int {
 	mainRoot, dstRoot, entries, code, ok := prepare(stdout, stderr, *manifestFlag)
 	if !ok {
 		return code
-	}
-	if len(entries) == 0 {
-		fmt.Fprintln(stdout, "git-wtcopy: manifest is empty; nothing to do.")
-		return 0
 	}
 
 	results := copier.Run(mainRoot, dstRoot, entries, copier.Options{Force: *force})

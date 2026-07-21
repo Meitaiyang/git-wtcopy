@@ -35,12 +35,11 @@ func chdir(t *testing.T, dir string) {
 	t.Cleanup(func() { os.Chdir(old) })
 }
 
-func TestRun_CopyEndToEnd(t *testing.T) {
-	// Arrange: a main worktree with a committed manifest and a gitignored
-	// .env file, plus a linked worktree (missing .env) to copy into.
+func newLinkedWorktreeWithManifest(t *testing.T, manifestContent string) (mainDir, linkedDir string) {
+	t.Helper()
 	base := t.TempDir()
-	mainDir := filepath.Join(base, "main")
-	linkedDir := filepath.Join(base, "feature")
+	mainDir = filepath.Join(base, "main")
+	linkedDir = filepath.Join(base, "feature")
 
 	if err := os.Mkdir(mainDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -49,15 +48,22 @@ func TestRun_CopyEndToEnd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(mainDir, ".wtcopy"), []byte(".env\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(mainDir, ".env"), []byte("SECRET=1"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(mainDir, ".wtcopy"), []byte(manifestContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, mainDir, "add", "README.md", ".wtcopy")
 	runGit(t, mainDir, "commit", "-q", "-m", "init")
 	runGit(t, mainDir, "worktree", "add", "-q", "-b", "feature", linkedDir)
+	return mainDir, linkedDir
+}
+
+func TestRun_CopyEndToEnd(t *testing.T) {
+	// Arrange: a main worktree with a committed manifest and a gitignored
+	// .env file, plus a linked worktree (missing .env) to copy into.
+	mainDir, linkedDir := newLinkedWorktreeWithManifest(t, ".env\n")
+	if err := os.WriteFile(filepath.Join(mainDir, ".env"), []byte("SECRET=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	chdir(t, linkedDir)
 
@@ -83,29 +89,51 @@ func TestRun_CopyEndToEnd(t *testing.T) {
 	}
 }
 
+func TestRun_CopyGlobEndToEnd(t *testing.T) {
+	// Arrange: a main worktree with two files matched by a committed .env*
+	// manifest entry, plus a linked worktree missing both files.
+	mainDir, linkedDir := newLinkedWorktreeWithManifest(t, ".env*\n")
+	if err := os.WriteFile(filepath.Join(mainDir, ".env"), []byte("BASE=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainDir, ".env.local"), []byte("LOCAL=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	chdir(t, linkedDir)
+
+	// Act: run the default copy command from the linked worktree.
+	var stdout, stderr bytes.Buffer
+	code := Run(nil, &stdout, &stderr)
+
+	// Assert: both matched files are copied with their source contents.
+	if code != 0 {
+		t.Fatalf("Run() = %d, stderr = %s", code, stderr.String())
+	}
+	for path, want := range map[string]string{
+		".env":       "BASE=1",
+		".env.local": "LOCAL=1",
+	} {
+		got, err := os.ReadFile(filepath.Join(linkedDir, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s content = %q, want %q", path, got, want)
+		}
+		if !strings.Contains(stdout.String(), path) {
+			t.Fatalf("stdout = %q, want copied path %s", stdout.String(), path)
+		}
+	}
+}
+
 func TestRun_StatusIsDryRun(t *testing.T) {
 	// Arrange: a main worktree with a committed manifest and a gitignored
 	// .env file, plus a linked worktree (missing .env) to run status from.
-	base := t.TempDir()
-	mainDir := filepath.Join(base, "main")
-	linkedDir := filepath.Join(base, "feature")
-
-	if err := os.Mkdir(mainDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, mainDir, "init", "-q")
-	if err := os.WriteFile(filepath.Join(mainDir, "README.md"), []byte("hi"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(mainDir, ".wtcopy"), []byte(".env\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mainDir, linkedDir := newLinkedWorktreeWithManifest(t, ".env\n")
 	if err := os.WriteFile(filepath.Join(mainDir, ".env"), []byte("SECRET=1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, mainDir, "add", "README.md", ".wtcopy")
-	runGit(t, mainDir, "commit", "-q", "-m", "init")
-	runGit(t, mainDir, "worktree", "add", "-q", "-b", "feature", linkedDir)
 
 	chdir(t, linkedDir)
 
@@ -126,6 +154,61 @@ func TestRun_StatusIsDryRun(t *testing.T) {
 	}
 }
 
+func TestRun_EmptyAndUnmatchedManifests(t *testing.T) {
+	cases := []struct {
+		name            string
+		args            []string
+		manifestContent string
+		wantStdout      string
+	}{
+		{
+			name:            "copy empty manifest",
+			manifestContent: "# no entries\n",
+			wantStdout:      "git-wtcopy: manifest is empty; nothing to do.\n",
+		},
+		{
+			name:            "status empty manifest",
+			args:            []string{"status"},
+			manifestContent: "# no entries\n",
+			wantStdout:      "git-wtcopy: manifest is empty; nothing to do.\n",
+		},
+		{
+			name:            "copy unmatched pattern",
+			manifestContent: "missing/*.env\n",
+			wantStdout:      "git-wtcopy: nothing to copy.\n",
+		},
+		{
+			name:            "status unmatched pattern",
+			args:            []string{"status"},
+			manifestContent: "missing/*.env\n",
+			wantStdout:      "git-wtcopy: nothing to copy.\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a linked worktree whose manifest is empty or matches nothing.
+			_, linkedDir := newLinkedWorktreeWithManifest(t, tc.manifestContent)
+			chdir(t, linkedDir)
+
+			// Act: run copy or status from the linked worktree.
+			var stdout, stderr bytes.Buffer
+			code := Run(tc.args, &stdout, &stderr)
+
+			// Assert: the shared prepare path reports the precise no-op reason.
+			if code != 0 {
+				t.Fatalf("Run(%v) = %d, stderr = %s", tc.args, code, stderr.String())
+			}
+			if stdout.String() != tc.wantStdout {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), tc.wantStdout)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRun_InitCreatesManifest(t *testing.T) {
 	// Arrange: a fresh git repository with no .wtcopy manifest yet.
 	dir := t.TempDir()
@@ -136,12 +219,18 @@ func TestRun_InitCreatesManifest(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"init"}, &stdout, &stderr)
 
-	// Assert: it exits cleanly and creates a .wtcopy manifest.
+	// Assert: it exits cleanly and creates a manifest documenting glob usage.
 	if code != 0 {
 		t.Fatalf("Run(init) = %d, stderr = %s", code, stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".wtcopy")); err != nil {
-		t.Fatalf(".wtcopy not created: %v", err)
+	content, err := os.ReadFile(filepath.Join(dir, ".wtcopy"))
+	if err != nil {
+		t.Fatalf("read .wtcopy: %v", err)
+	}
+	for _, want := range []string{".env*", "packages/*/.env", "Recursive ** patterns are not supported"} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf(".wtcopy = %q, want it to contain %q", content, want)
+		}
 	}
 }
 

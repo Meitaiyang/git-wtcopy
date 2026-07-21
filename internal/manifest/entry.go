@@ -9,7 +9,8 @@ const DefaultFilename = ".wtcopy"
 
 // Entry is a single path listed in a .wtcopy file.
 type Entry struct {
-	// Path is the repository-root-relative path exactly as written in the
-	// manifest, using "/" as the separator regardless of host OS.
+	// Path is a repository-root-relative path using "/" as the separator
+	// regardless of host OS. Entries returned by Parse may contain glob
+	// patterns; entries returned by Expand contain concrete paths.
 	Path string
 }

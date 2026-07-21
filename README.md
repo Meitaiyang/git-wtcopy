@@ -51,15 +51,39 @@ destination are left alone; pass `--force` to overwrite them.
 
 ## `.wtcopy` file format
 
-One repository-root-relative path per line. Blank lines and lines
-starting with `#` are ignored. A listed directory is copied recursively.
+One repository-root-relative path or glob pattern per line. Blank lines and
+lines starting with `#` are ignored. A listed or matched directory is copied
+recursively.
 
 ```
 # .wtcopy
-.env
-.env.local
+.env*
+packages/*/.env
 .venv
 ```
+
+Patterns support `*` (any sequence within one path segment), `?` (one
+character), and `[...]` (a character class). Recursive `**` patterns are not
+supported and are rejected when the manifest is read. Glob patterns that match
+nothing are silently ignored. Paths without glob metacharacters retain the
+original behavior, including reporting `missing in source` when the path does
+not exist in the main worktree.
+
+Unlike many shells, glob matching includes dotfiles. The repository-root `.git`
+directory and paths below it are always removed from glob results; other
+dotfiles such as `.env` match normally. A literal `.git` entry retains the
+existing literal-path behavior.
+
+Glob matches reached through an intermediate directory symlink that resolves
+outside the main worktree are also silently removed. These safety filters apply
+only to paths discovered by glob expansion. Literal entries are explicit paths
+and retain the existing behavior, including when an intermediate symlink points
+outside the main worktree.
+
+There is no cross-platform escaping syntax for filenames that literally
+contain `[`, `*`, or `?`; such entries are interpreted as patterns. Although
+the underlying matcher supports backslash escaping on Unix-like systems,
+Windows treats backslash as a path separator.
 
 `.wtcopy` itself must be a **tracked** file (do not gitignore it) so that
 it exists in every worktree right after checkout.
@@ -90,7 +114,7 @@ See `internal/worktree` for the implementation.
 cmd/git-wtcopy/       entrypoint — wires internal/cli.Run to os.Args
 internal/
   worktree/           on-disk worktree topology detection (no git CLI/lib)
-  manifest/           .wtcopy parsing and validation
+  manifest/           .wtcopy parsing, validation, and read-only glob expansion
   copier/             copies manifest entries between two worktree roots
   cli/                subcommand dispatch and flag parsing (stdlib only)
 ```

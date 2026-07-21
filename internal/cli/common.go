@@ -73,6 +73,20 @@ func prepare(stdout, stderr io.Writer, manifestOverride string) (mainRoot, dstRo
 		fmt.Fprintf(stderr, "git-wtcopy: %v\n", err)
 		return "", "", nil, 1, false
 	}
+	if len(entries) == 0 {
+		_, _ = fmt.Fprintln(stdout, "git-wtcopy: manifest is empty; nothing to do.")
+		return "", "", nil, 0, false
+	}
+
+	entries, err = manifest.Expand(mainRoot, entries)
+	if err != nil {
+		fmt.Fprintf(stderr, "git-wtcopy: %v\n", err)
+		return "", "", nil, 1, false
+	}
+	if len(entries) == 0 {
+		_, _ = fmt.Fprintln(stdout, "git-wtcopy: nothing to copy.")
+		return "", "", nil, 0, false
+	}
 
 	return mainRoot, layout.WorktreeRoot, entries, 0, true
 }

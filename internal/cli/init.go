@@ -9,15 +9,17 @@ import (
 
 const manifestTemplate = `# .wtcopy - files/directories to copy from the main worktree into this one.
 #
-# One repository-root-relative path per line. Lines starting with "#" and
-# blank lines are ignored. Directories are copied recursively.
+# One repository-root-relative path or glob pattern per line. Supported glob
+# metacharacters are *, ?, and [...]. Recursive ** patterns are not supported.
+# Lines starting with "#" and blank lines are ignored. Directories are copied
+# recursively.
 #
 # Commit this file to git (do not gitignore it) so it is present in every
 # worktree created with "git worktree add".
 #
 # Examples:
-# .env
-# .env.local
+# .env*
+# packages/*/.env
 # .venv
 `
 
